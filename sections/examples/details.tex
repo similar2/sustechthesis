@@ -1,60 +1,44 @@
 % !Mode:: "TeX:UTF-8"
 % !TEX program  = xelatex
+\section{实验设计}
+\subsection{实验目标}
+本文重点评估所提方法在显存受限条件下对吞吐量、平均延迟、P95 延迟、命中率与淘汰行为的影响，并分析预测机制与显存感知模块的实际贡献。
 
-\section{一些样例}
+\subsection{实验设置}
+实验平台为 NVIDIA A800（80GB），Ubuntu Linux 5.4.0，CPU 为 Intel Xeon Gold 5320 @ 2.20GHz，内存 692GB。基础模型选用 Llama-2-13b，基础模型显存占用约 28GB。构建多个 LoRA 适配器模拟多任务推理，总适配器显存约 5GB；适配器预算设置为 2GB 与 4GB 两种场景。
 
-\subsection{表格}
+\subsection{工作负载}
+\subsubsection{长尾分布}
+采用 Zipf 分布生成请求：
+\begin{equation}
+P(x_t=a_i)=\frac{i^{-s}}{\sum_{j=1}^M j^{-s}},\quad s=1.0
+\end{equation}
+该场景用于评估策略识别并保留高频适配器的能力。
 
-表格与图片可以直接通过 \verbbox{\ref{<key>}} 来引用，例如表 \ref{table2}、图 \ref{F:test-a}、图 \ref{F:test-b-sub-b}。
+\subsubsection{动态热点迁移}
+将请求序列分为多个阶段，每阶段具有不同热点集合。设热点请求占比 $\theta=0.8$，相邻阶段热点集合重叠比例约为 $\rho$，用于评估策略对非平稳负载的适应速度。
 
-\begin{table}[htb]
-  % h-here, t-top, b-bottom，优先级依次下降
-  % 居中，模版已设定表格浮动体居中
-  \centering
-  \caption{表格的标题应该放在上方}
-  \label{table}
-  \begin{tabular}{lc} % 三线表不能有竖线，l-left, c-center, r-right
-    \toprule
-    % 三线表-top 线
-    Example & Result \\
-    \midrule
-    % 三线表-middle 线
-    Example1          & 0.25 \\
-    Example2          & 0.36 \\
-    \bottomrule
-    % 三线表-底线
-  \end{tabular}
-\end{table}
+\subsubsection{异构适配器}
+根据显存大小将适配器划分为 $S$（小/中）与 $L$（大）两类，并设置 $P(x_t\in S)=\phi=0.75$。该场景用于评估策略在“访问频率 vs. 显存成本”冲突下的决策质量。
 
-\begin{table}[htb]
-  \centering
-  \caption{带表注的表格的标题}
-  \label{table2}
-  \begin{threeparttable}
-    \setlength{\tabcolsep}{0.6cm}{ % 调节表格长度
-      \begin{tabular}{lc} % 三线表不能有竖线，l-left, c-center, r-right
-        \toprule
-        % 三线表-top 线
-        Example & Result \\
-        \midrule
-        % 三线表-middle 线
-        Example1          & 0.25\tnote{1} \\
-        Example2          & 0.36 \\
-        \bottomrule
-        % 三线表-底线
-      \end{tabular}
-    }
-    \begin{tablenotes}
-    \item[1] 数据来源：南方科技大学 \LaTeX 模版 % 增加表格数据来源注释
-    \end{tablenotes}
-  \end{threeparttable}
-\end{table}
+\subsection{实现细节}
+系统实现由 AdapterRuntime 统一调度，基础模型常驻 GPU，LoRA 适配器由 AdapterPool 动态装载与淘汰。对比方法包括 FIFO、LRU、LFU 与本文方法，并支持消融配置。系统记录命中率、未命中次数、淘汰次数、平均延迟、P95 延迟、吞吐量、总加载时间等指标。
 
-\begin{proof}
-  这是一个证明符号的示例。
-\end{proof}
+\subsection{数据分析}
+\subsubsection{总体表现}
+在 4GB 预算下，本文方法在长尾、热点迁移、异构分布三类负载上均达到更高命中率与更低平均延迟，表明预测与显存感知机制能够协同提升整体性能。
 
-\subsection{参考文献}
+在 2GB 与 4GB 预算对比中，本文方法均取得最高命中率，并显著降低淘汰次数。尤其在 2GB 场景，收益更为明显，说明资源越紧张，策略质量越关键。
 
-参考文献一般使用 \verbbox{\cite{<key>}} 命令，效果如是\cite{Nicholas1998Handbook}；
-引用作者使用 \verbbox{\citeauthor{<key>}}，效果如是“\citeauthor{goossens1994latex}”。
+\subsubsection{消融实验}
+消融结果显示：去除显存归一化模块后性能显著下降；去除短期频率项或成本感知项后性能下降相对较小。结果表明显存感知机制是提升资源利用效率的关键模块，而预测信号可继续优化。
+
+\section{相关研究}
+\subsection{参数高效微调（PEFT）}
+PEFT 研究从 Adapter、Prefix-Tuning 到 LoRA、AdaLoRA、QLoRA，不断降低训练与部署成本。
+
+\subsection{多 LoRA 推理系统}
+相关系统包括 PetS、Punica、S-LoRA、dLoRA 与 Toppings，重点优化执行层面的并行、分页与调度能力。
+
+\subsection{大语言模型推理与缓存管理}
+vLLM、Orca、Sarathi-Serve、Splitwise 等工作推动了 LLM 推理系统优化。缓存方面，ARC、TinyLFU、LeCaR、LRB 及 Learned Prefix Caching 等方法展现了预测驱动决策在复杂负载中的潜力。

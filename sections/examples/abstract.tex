@@ -1,27 +1,18 @@
 % !Mode:: "TeX:UTF-8"
 % !TEX program  = xelatex
+\begin{中文摘要}{LoRA 推理，适配器调度，预测驱动缓存，指数滑动平均，资源管理}
+随着大语言模型的广泛应用，基于 PEFT（Parameter-Efficient Fine-Tuning）的技术，如 LoRA（Low-Rank Adaptation），被广泛用于支持多任务与个性化推理。在实际部署中，一个推理系统往往需要同时服务大量 LoRA 适配器，而 GPU 显存限制使得系统无法同时加载全部适配器，从而需要在运行过程中频繁进行适配器的加载与替换。该过程会引入显著的性能开销，成为多 LoRA 推理系统的关键瓶颈。
 
-% 摘要通常不分段，实际写作中请顶第一行开始接连书写文字，中间不要有空行
-\begin{中文摘要}{\LaTeX ；接口}
-  如用英文写作，则英文摘要在前，中文摘要在后。
+现有方法通常采用被动的适配器管理策略，例如基于 LRU 或 LFU 的缓存机制。这类方法仅依赖历史访问信息进行决策，缺乏对未来请求的建模能力，在动态或突发负载场景下容易导致频繁的缓存失效与适配器切换。
 
-  笔者见到的毕业论文模板，大多是以文类的形式，少部分以宏包的形式，并且在模板中大多掺杂着各式各样的例子（除了维护频率高的模板），
-  导致模板文件使用了大部分与形式格式不相关的内容，代码量巨大文档欠缺且不容易修改，出现问题需要查看宏包或者文类的源代码。
-  于是，秉着仅提供实现最基本要求的理念，重构了之前所写的 \TeX\ 形式。
-  由于第二年使用该模板，所以设计出的模板接口不能保证以后不发生重大变动，一切以文档为主。
-  毕竟学校在发展初期，各类文件都在日渐完善，前几年时，学校标志及名称还发生变化，同时毕业论文的样式也发生了重大变化。
-  但是可以保证的是，模板提供的接口均为中文形式\footnote{
-    使用 \hologo{XeLaTeX} 特性，一方面增加辨识度，另一方面不拘泥于英文命名的规则。
-    当然此举也有些许弊端，在此就不过多展开。
-  }，并且至少更新到 2021 年，也就是笔者毕业。
-  模板这种东西不能保证一劳永逸，一方面学校的标准制度都在发生着改变，
-  另一方面 \hologo{LaTeX} 的宏包也在发生着改变，早先流行的宏包可能几年后就被“淘汰”掉。
-  因此，您的使用与反馈是我不断更新的动力，希望各位不吝赐教。
+为了解决上述问题，本文提出一种基于预测的适配器调度方法。该方法利用指数滑动平均（EMA）对适配器访问趋势进行建模，并结合请求队列信息与适配器活跃状态构建统一的效用函数，同时引入显存感知机制对不同适配器进行归一化处理。在显存约束下，系统通过求解近似的效用最大化问题动态维护适配器驻留集合，从而优先保留高价值适配器。
 \end{中文摘要}
 
-\begin{英文摘要}{LaTeX, Interface}
-  For theses written in English, the English abstract should be placed before the Chinese abstract.
+\begin{英文摘要}{LoRA inference, adapter scheduling, prediction-driven caching, exponential moving average, resource management}
+With the rapid adoption of large language models (LLMs), parameter-efficient fine-tuning (PEFT) methods such as LoRA (Low-Rank Adaptation) have been widely used to support multi-task and personalized inference. In practical deployment scenarios, a serving system often needs to manage a large number of LoRA adapters simultaneously. However, due to limited GPU memory, it is impossible to keep all adapters resident on GPU at the same time, resulting in frequent adapter loading and replacement during runtime. This process introduces significant overhead and becomes a major performance bottleneck in multi-LoRA serving systems.
 
-  \lipsum[1]
+Existing approaches typically adopt passive adapter management strategies, such as LRU- or LFU-based caching mechanisms. These methods rely only on historical access information and lack the ability to model future requests, making them prone to frequent cache misses and adapter switching under dynamic or bursty workloads.
+
+To address these challenges, this paper proposes a prediction-based adapter scheduling method. The proposed approach utilizes Exponential Moving Average (EMA) to model adapter access trends, and further incorporates request queue information and adapter activity states into a unified utility function. In addition, a memory-aware normalization mechanism is introduced to handle heterogeneous adapter sizes. Under GPU memory constraints, the system dynamically maintains the resident adapter set by approximately solving a utility maximization problem, thereby prioritizing high-value adapters and reducing unnecessary adapter reloads.
 \end{英文摘要}
 \cleardoublepage
