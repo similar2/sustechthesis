@@ -1,60 +1,42 @@
 % !Mode:: "TeX:UTF-8"
 % !TEX program  = xelatex
+\section{实验设计}
+\subsection{实验目标}
+本节旨在系统评估本文提出的基于预测的适配器调度方法在多 LoRA 推理场景下的有效性。我们重点关注：与 LRU/LFU 等传统策略相比，是否能在有限显存下提升吞吐量并降低延迟；是否能更高效利用显存提升命中率；预测机制（EMA）的贡献；以及在不同负载模式下的稳定性与泛化能力。
 
-\section{一些样例}
+\subsection{实验设置}
+实验平台为 NVIDIA A800（80GB），系统为 Ubuntu Linux 5.4.0，CPU 为 Intel Xeon Gold 5320 @ 2.20GHz，内存为 692GB。模型方面选用 Llama-2-13b 作为基础模型（约 28GB 显存），并构建多个 LoRA 适配器模拟多任务推理。全部 LoRA 适配器总显存约 5GB，适配器可用预算设置为 2GB 与 4GB，因此系统需动态进行驻留与淘汰决策。
 
-\subsection{表格}
+\subsection{工作负载}
+\subsubsection{长尾分布}
+为模拟真实服务中的长尾访问模式，采用 Zipf 分布生成请求：
+\begin{equation}
+P(x_t=a_i)=\frac{i^{-s}}{\sum_{j=1}^{M}j^{-s}},\quad s=1.0
+\end{equation}
+该负载用于评估策略对高频适配器的识别与保留能力。
 
-表格与图片可以直接通过 \verbbox{\ref{<key>}} 来引用，例如表 \ref{table2}、图 \ref{F:test-a}、图 \ref{F:test-b-sub-b}。
+\subsubsection{动态热点迁移}
+请求序列划分为 $P$ 个阶段，每阶段约 $Q=\lfloor N/P\rfloor$ 个请求。第 $p$ 阶段热点集合为 $\mathcal{H}_p\subseteq\mathcal{A}$，并满足 $|\mathcal{H}_p|=H$。设热点请求占比为 $\theta=0.8$，并通过重叠比例 $\rho$ 控制相邻阶段热点迁移强度。
 
-\begin{table}[htb]
-  % h-here, t-top, b-bottom，优先级依次下降
-  % 居中，模版已设定表格浮动体居中
-  \centering
-  \caption{表格的标题应该放在上方}
-  \label{table}
-  \begin{tabular}{lc} % 三线表不能有竖线，l-left, c-center, r-right
-    \toprule
-    % 三线表-top 线
-    Example & Result \\
-    \midrule
-    % 三线表-middle 线
-    Example1          & 0.25 \\
-    Example2          & 0.36 \\
-    \bottomrule
-    % 三线表-底线
-  \end{tabular}
-\end{table}
+\subsubsection{异构适配器}
+设适配器显存为 $\mathrm{mem}(a_i)$，按阈值 $\eta$ 分为小/中集合 $S$ 与大集合 $L$。设 $P(x_t\in S)=\phi=0.75$，$P(x_t\in L)=1-\phi$。该负载用于评估策略在“访问频率收益”与“显存占用成本”冲突下的决策质量。
 
-\begin{table}[htb]
-  \centering
-  \caption{带表注的表格的标题}
-  \label{table2}
-  \begin{threeparttable}
-    \setlength{\tabcolsep}{0.6cm}{ % 调节表格长度
-      \begin{tabular}{lc} % 三线表不能有竖线，l-left, c-center, r-right
-        \toprule
-        % 三线表-top 线
-        Example & Result \\
-        \midrule
-        % 三线表-middle 线
-        Example1          & 0.25\tnote{1} \\
-        Example2          & 0.36 \\
-        \bottomrule
-        % 三线表-底线
-      \end{tabular}
-    }
-    \begin{tablenotes}
-    \item[1] 数据来源：南方科技大学 \LaTeX 模版 % 增加表格数据来源注释
-    \end{tablenotes}
-  \end{threeparttable}
-\end{table}
+\subsection{实现细节}
+系统由 AdapterRuntime 统一管理，基础模型常驻 GPU，LoRA 适配器由 AdapterPool 在预算内动态加载与淘汰。对比策略包括 FIFO、LRU、LFU 与本文方法，并支持消融配置。记录指标包括命中率、未命中次数、淘汰次数、平均延迟、P95 延迟、吞吐量和总加载时间。
 
-\begin{proof}
-  这是一个证明符号的示例。
-\end{proof}
+\subsection{数据分析}
+\subsubsection{总体表现}
+在 4GB 显存预算下，本文方法在长尾分布、热点偏移与异构分布场景中均取得更高缓存命中率与更低平均延迟。对比 2GB/4GB 两种预算时，本文方法均表现出更低淘汰次数和更高命中率，且在 2GB 场景优势更显著。
 
-\subsection{参考文献}
+\subsubsection{消融实验}
+消融实验显示：去除显存归一化模块后命中率显著下降；去除短期频率项与成本感知项后性能下降相对较小。结果验证了显存感知机制的重要性。
 
-参考文献一般使用 \verbbox{\cite{<key>}} 命令，效果如是\cite{Nicholas1998Handbook}；
-引用作者使用 \verbbox{\citeauthor{<key>}}，效果如是“\citeauthor{goossens1994latex}”。
+\section{相关研究}
+\subsection{参数高效微调（PEFT）}
+PEFT 方向从 Adapter、Prefix-Tuning 到 LoRA、AdaLoRA、QLoRA，不断降低训练与部署开销。
+
+\subsection{多 LoRA 推理系统}
+PetS、Punica、S-LoRA、dLoRA 与 Toppings 等工作主要从执行层优化（kernel、分页、异构批处理、CPU/GPU 协同）提升吞吐与时延表现。
+
+\subsection{大语言模型推理与缓存管理}
+vLLM、Orca、Sarathi-Serve、Splitwise 等系统推进了推理调度与内存管理。缓存研究方面，ARC、TinyLFU、LeCaR、LRB 与 Learned Prefix Caching 等方法展示了预测/学习驱动策略的有效性。

@@ -1,0 +1,43 @@
+% !Mode:: "TeX:UTF-8"
+% !TEX program  = xelatex
+\section{方法设计}
+\subsection{方法概述}
+针对多 LoRA 适配器推理中频繁加载与切换带来的性能问题，本文提出一种基于预测的适配器管理方法。该方法的核心思想是在显存受限的条件下，通过对适配器未来使用情况进行轻量级预测，动态维护一个高效的适配器驻留集合。
+
+与传统依赖历史访问模式的被动缓存策略（如 FIFO 或 LRU）不同，本文方法显式建模适配器的未来使用概率，并基于该预测结果进行资源分配决策。具体而言，在每个时间步 $t$，系统根据历史请求序列与当前系统状态，为每个适配器计算一个效用评分，并在显存约束下选择一组高效用适配器驻留在 GPU 中，从而减少不必要的加载开销。
+
+\subsection{基于 EMA 的适配器使用预测}
+为了刻画适配器在未来时间窗口内的使用概率，本文引入 EMA（Exponential Moving Average）对适配器访问行为进行建模。相比简单的频率统计方法，EMA 能够更好地捕捉时间序列中的动态变化，对近期访问赋予更高权重，从而更准确地反映短期趋势。
+
+对于任意适配器 $a$，其在时间步 $t$ 的 EMA 值定义为：
+\begin{equation}
+EMA_t(a)=\lambda\cdot EMA_{t-1}(a)+(1-\lambda)\cdot\mathbb{I}(a_t=a)
+\end{equation}
+其中 $\lambda\in[0,1]$ 为衰减因子；$\mathbb{I}(a_t=a)$ 为指示函数，当时间步 $t$ 的请求使用适配器 $a$ 时取 1，否则为 0。
+
+\subsection{适配器效用建模}
+在预测适配器未来使用概率的基础上，本文进一步结合系统状态信息，构建适配器的综合效用函数。对于适配器 $a$，其在时间步 $t$ 的基础效用定义为：
+\begin{equation}
+S_t(a)=\alpha\cdot EMA_t(a)+\beta\cdot Q_t(a)+\gamma\cdot A_t(a)
+\end{equation}
+其中 $Q_t(a)$ 表示当前请求队列中等待该适配器的请求数量；$A_t(a)$ 为活跃指示变量（若适配器当前正在被使用，则为 1，否则为 0）；$\alpha,\beta,\gamma$ 为权重参数。
+
+\subsection{显存感知的效用归一化}
+在多适配器推理场景中，不同适配器的显存占用存在显著差异。若仅依据访问概率进行决策，可能导致少数大规模适配器占据大量显存，从而降低整体资源利用效率。为此，本文引入显存感知机制，对适配器效用进行归一化处理：
+\begin{equation}
+\tilde{S}_t(a)=\frac{S_t(a)}{(\mathrm{mem}(a))^\delta}
+\end{equation}
+其中 $\delta$ 为调节参数，用于控制显存因素的重要性。
+
+\subsection{动态适配器选择策略}
+在每个时间步，系统根据归一化效用 $\tilde{S}_t(a)$ 对所有适配器进行排序，并在显存约束下构建驻留集合：
+\begin{equation}
+\mathcal{H}_t^*=\underset{\mathcal{H}\subseteq\mathcal{A}}{\operatorname{argmax}}\sum_{a\in\mathcal{H}}\tilde{S}_t(a),\quad \text{s.t.}\sum_{a\in\mathcal{H}}\mathrm{mem}(a)\le M
+\end{equation}
+该问题本质上类似 0-1 背包问题。考虑在线系统的实时性要求，本文采用基于效用排序的贪心近似算法求解。
+
+\subsection{在线决策过程}
+\textbf{Algorithm 1：} 基于预测的适配器调度算法。\par
+输入：当前驻留集合 $\mathcal{H}_t$、请求 $r_t$ 及其适配器 $a_t$、显存预算 $M$。\par
+输出：更新后的驻留集合 $\mathcal{H}_{t+1}$。\par
+步骤：更新统计信息；计算效用；命中则直接执行；未命中时在必要条件下执行低效用优先淘汰并加载；更新并返回新驻留集合。
