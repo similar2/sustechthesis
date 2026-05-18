@@ -2,41 +2,43 @@
 % !TEX program  = xelatex
 \section{实验设计}
 \subsection{实验目标}
-本节旨在系统评估本文提出的基于预测的适配器调度方法在多 LoRA 推理场景下的有效性。我们重点关注：与 LRU/LFU 等传统策略相比，是否能在有限显存下提升吞吐量并降低延迟；是否能更高效利用显存提升命中率；预测机制（EMA）的贡献；以及在不同负载模式下的稳定性与泛化能力。
+本文重点评估所提方法在显存受限条件下对吞吐量、平均延迟、P95 延迟、命中率与淘汰行为的影响，并分析预测机制与显存感知模块的实际贡献。
 
 \subsection{实验设置}
-实验平台为 NVIDIA A800（80GB），系统为 Ubuntu Linux 5.4.0，CPU 为 Intel Xeon Gold 5320 @ 2.20GHz，内存为 692GB。模型方面选用 Llama-2-13b 作为基础模型（约 28GB 显存），并构建多个 LoRA 适配器模拟多任务推理。全部 LoRA 适配器总显存约 5GB，适配器可用预算设置为 2GB 与 4GB，因此系统需动态进行驻留与淘汰决策。
+实验平台为 NVIDIA A800（80GB），Ubuntu Linux 5.4.0，CPU 为 Intel Xeon Gold 5320 @ 2.20GHz，内存 692GB。基础模型选用 Llama-2-13b，基础模型显存占用约 28GB。构建多个 LoRA 适配器模拟多任务推理，总适配器显存约 5GB；适配器预算设置为 2GB 与 4GB 两种场景。
 
 \subsection{工作负载}
 \subsubsection{长尾分布}
-为模拟真实服务中的长尾访问模式，采用 Zipf 分布生成请求：
+采用 Zipf 分布生成请求：
 \begin{equation}
-P(x_t=a_i)=\frac{i^{-s}}{\sum_{j=1}^{M}j^{-s}},\quad s=1.0
+P(x_t=a_i)=\frac{i^{-s}}{\sum_{j=1}^M j^{-s}},\quad s=1.0
 \end{equation}
-该负载用于评估策略对高频适配器的识别与保留能力。
+该场景用于评估策略识别并保留高频适配器的能力。
 
 \subsubsection{动态热点迁移}
-请求序列划分为 $P$ 个阶段，每阶段约 $Q=\lfloor N/P\rfloor$ 个请求。第 $p$ 阶段热点集合为 $\mathcal{H}_p\subseteq\mathcal{A}$，并满足 $|\mathcal{H}_p|=H$。设热点请求占比为 $\theta=0.8$，并通过重叠比例 $\rho$ 控制相邻阶段热点迁移强度。
+将请求序列分为多个阶段，每阶段具有不同热点集合。设热点请求占比 $\theta=0.8$，相邻阶段热点集合重叠比例约为 $\rho$，用于评估策略对非平稳负载的适应速度。
 
 \subsubsection{异构适配器}
-设适配器显存为 $\mathrm{mem}(a_i)$，按阈值 $\eta$ 分为小/中集合 $S$ 与大集合 $L$。设 $P(x_t\in S)=\phi=0.75$，$P(x_t\in L)=1-\phi$。该负载用于评估策略在“访问频率收益”与“显存占用成本”冲突下的决策质量。
+根据显存大小将适配器划分为 $S$（小/中）与 $L$（大）两类，并设置 $P(x_t\in S)=\phi=0.75$。该场景用于评估策略在“访问频率 vs. 显存成本”冲突下的决策质量。
 
 \subsection{实现细节}
-系统由 AdapterRuntime 统一管理，基础模型常驻 GPU，LoRA 适配器由 AdapterPool 在预算内动态加载与淘汰。对比策略包括 FIFO、LRU、LFU 与本文方法，并支持消融配置。记录指标包括命中率、未命中次数、淘汰次数、平均延迟、P95 延迟、吞吐量和总加载时间。
+系统实现由 AdapterRuntime 统一调度，基础模型常驻 GPU，LoRA 适配器由 AdapterPool 动态装载与淘汰。对比方法包括 FIFO、LRU、LFU 与本文方法，并支持消融配置。系统记录命中率、未命中次数、淘汰次数、平均延迟、P95 延迟、吞吐量、总加载时间等指标。
 
 \subsection{数据分析}
 \subsubsection{总体表现}
-在 4GB 显存预算下，本文方法在长尾分布、热点偏移与异构分布场景中均取得更高缓存命中率与更低平均延迟。对比 2GB/4GB 两种预算时，本文方法均表现出更低淘汰次数和更高命中率，且在 2GB 场景优势更显著。
+在 4GB 预算下，本文方法在长尾、热点迁移、异构分布三类负载上均达到更高命中率与更低平均延迟，表明预测与显存感知机制能够协同提升整体性能。
+
+在 2GB 与 4GB 预算对比中，本文方法均取得最高命中率，并显著降低淘汰次数。尤其在 2GB 场景，收益更为明显，说明资源越紧张，策略质量越关键。
 
 \subsubsection{消融实验}
-消融实验显示：去除显存归一化模块后命中率显著下降；去除短期频率项与成本感知项后性能下降相对较小。结果验证了显存感知机制的重要性。
+消融结果显示：去除显存归一化模块后性能显著下降；去除短期频率项或成本感知项后性能下降相对较小。结果表明显存感知机制是提升资源利用效率的关键模块，而预测信号可继续优化。
 
 \section{相关研究}
 \subsection{参数高效微调（PEFT）}
-PEFT 方向从 Adapter、Prefix-Tuning 到 LoRA、AdaLoRA、QLoRA，不断降低训练与部署开销。
+PEFT 研究从 Adapter、Prefix-Tuning 到 LoRA、AdaLoRA、QLoRA，不断降低训练与部署成本。
 
 \subsection{多 LoRA 推理系统}
-PetS、Punica、S-LoRA、dLoRA 与 Toppings 等工作主要从执行层优化（kernel、分页、异构批处理、CPU/GPU 协同）提升吞吐与时延表现。
+相关系统包括 PetS、Punica、S-LoRA、dLoRA 与 Toppings，重点优化执行层面的并行、分页与调度能力。
 
 \subsection{大语言模型推理与缓存管理}
-vLLM、Orca、Sarathi-Serve、Splitwise 等系统推进了推理调度与内存管理。缓存研究方面，ARC、TinyLFU、LeCaR、LRB 与 Learned Prefix Caching 等方法展示了预测/学习驱动策略的有效性。
+vLLM、Orca、Sarathi-Serve、Splitwise 等工作推动了 LLM 推理系统优化。缓存方面，ARC、TinyLFU、LeCaR、LRB 及 Learned Prefix Caching 等方法展现了预测驱动决策在复杂负载中的潜力。
