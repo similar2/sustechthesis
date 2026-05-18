@@ -1,37 +1,70 @@
 % !Mode:: "TeX:UTF-8"
 % !TEX program  = xelatex
-\section{文类接口}
-文类的接口的命名均为汉字，意思为字面意思，
-如有疑问，欢迎在 GitHub 提出 \href{https://github.com/Iydon/sustechthesis/issues}{Issues}。
+\section{系统模型与问题定义}
+\subsection{系统模型}
+本文考虑一个多租户的大语言模型推理系统，其中一个共享的基础模型被加载至 GPU 上，而多个 LoRA 适配器用于支持不同任务或用户请求。设适配器集合为 $\mathcal{A}=\{a_1,a_2,\dots,a_N\}$，系统在运行过程中需要处理一系列请求序列 $\mathcal{R}=\{r_1,r_2,\dots\}$，其中每个请求 $r_i$ 关联唯一的适配器 $a(r_i)\in\mathcal{A}$。
 
-\subsection{汉化字号接口}
-本接口主要使用 \texttt{ctex} 宏包。
+由于 GPU 显存资源有限，系统无法同时容纳所有适配器。设 GPU 可用于适配器的显存预算为 $M$，每个适配器 $a$ 占用显存大小为 $\mathrm{mem}(a)$，则任意时刻驻留在 GPU 上的适配器集合 $\mathcal{H}_t\subseteq\mathcal{A}$ 必须满足如下约束：
+\begin{equation}
+\sum_{a\in\mathcal{H}_t}\mathrm{mem}(a)\le M
+\end{equation}
 
-\verbbox{\初号}，\verbbox{\小初}，\verbbox{\一号}，\verbbox{\小一}，\verbbox{\二号}，\verbbox{\小二}，\verbbox{\三号}，\verbbox{\小三}，
-\verbbox{\四号}，\verbbox{\小四}，\verbbox{\五号}，\verbbox{\小五}，\verbbox{\六号}，\verbbox{\小六}，\verbbox{\七号}，\verbbox{\八号}。
+当一个请求到达时，若其所需适配器已经存在于当前驻留集合 $\mathcal{H}_t$ 中，则可以直接执行推理；否则，系统需要将该适配器从 CPU 或外部存储加载至 GPU。该过程通常伴随着显著的时间开销，并可能触发已有适配器的淘汰操作。此外，不同适配器在显存占用与加载开销上可能存在显著差异，这进一步增加了资源管理的复杂性。
 
-\subsection{汉化字体接口}
-可能本机上部分字体不存在，导致部分字体无法使用。
+\subsection{问题定义}
+在上述系统模型下，本文关注如下核心问题：在给定请求序列 $\mathcal{R}$ 和显存约束 $M$ 的条件下，如何动态管理适配器的驻留与淘汰，以优化系统整体性能。具体而言，在每个时间步 $t$，系统接收到一个请求 $r_t$，其对应适配器为 $a_t=a(r_t)$。系统需要根据当前状态（包括历史请求、当前驻留集合以及系统负载情况）决定是否需要加载新的适配器，并在必要时选择合适的适配器进行淘汰。
+\begin{equation}
+\min\sum_t\mathbb{I}_{\text{miss}}(t)\cdot\mathrm{cost}(a_t)
+\end{equation}
 
-\verbbox{\宋体}，\verbbox{\黑体}，\verbbox{\仿宋}，\verbbox{\楷书}，
-\verbbox{\隶书}，\verbbox{\幼圆}，\verbbox{\雅黑}，\verbbox{\苹方}。
+\subsection{基线方法}
+\subsubsection{FIFO (First-In, First-Out)}
+FIFO 按照适配器进入 GPU 的时间顺序进行管理。显存不足时，优先淘汰最早加载的适配器。其实现简单，但无法利用访问模式信息。
 
-\subsection{字体效果接口}
+\subsubsection{LRU (Least Recently Used)}
+LRU 假设近期访问的适配器未来更可能被再次使用。系统维护最近访问时间戳并在显存不足时淘汰“最久未使用”者。
 
-建议在正文时使用 \verb|\textbf{}|，\verb|\textit{}| 调用\textbf{粗体}与\textit{斜体}。
+\subsubsection{LFU (Least Frequently Used)}
+LFU 基于累计访问频率进行淘汰。该策略能较好识别长期热点，但缺乏时间敏感性，在热点迁移场景中适应较慢。
 
-It is recommended to use \verb|\textbf{}|，\verb|\textit{}| to call \textbf{Bold} and \textit{ItalicFont}.
+\subsubsection{方法对比分析}
+上述方法均属于被动缓存策略，仅基于历史访问信息进行决策，未显式建模未来请求，也未充分考虑适配器显存占用差异。
 
-\verbbox{\粗体}，\verbbox{\斜体}。
+\section{方法设计}
+\subsection{方法概述}
+本文提出一种基于预测的适配器调度方法。在显存受限条件下，系统通过对适配器未来使用趋势进行轻量级预测，动态维护高价值适配器驻留集合。
 
-\subsection{格式相关接口}
-\subsubsection{命令}
-例子请参考前文，在写论文初期，可以注释掉标题页等不必要信息，以加快编译速度。
+\subsection{基于 EMA 的适配器使用预测}
+对于任意适配器 $a$，其在时间步 $t$ 的 EMA 值定义为：
+\begin{equation}
+EMA_t(a)=\lambda\cdot EMA_{t-1}(a)+(1-\lambda)\cdot\mathbb{I}(a_t=a)
+\end{equation}
+其中 $\lambda\in[0,1]$ 为衰减因子，$\mathbb{I}(a_t=a)$ 为指示函数。
 
-\verbbox{\设置信息}，\verbbox{\目录}，\verbbox{\下划线}，\verbbox{\中文标题页}，\verbbox{\英文标题页}，
-\verbbox{\中文诚信承诺书}，\verbbox{\英文诚信承诺书}，\verbbox{\摘要标题}，\verbbox{\参考文献}，\verbbox{\附录}，\verbbox{\致谢}。
+\subsection{适配器效用建模}
+\begin{equation}
+S_t(a)=\alpha\cdot EMA_t(a)+\beta\cdot Q_t(a)+\gamma\cdot A_t(a)
+\end{equation}
+其中 $Q_t(a)$ 表示队列中等待该适配器的请求数，$A_t(a)$ 为活跃状态指示量，$\alpha,\beta,\gamma$ 为权重参数。
 
-\subsubsection{环境}
-摘要环境均需一个参数，为关键词：\verb|\begin{}{}...\end{}|。
+\subsection{显存感知的效用归一化}
+\begin{equation}
+\tilde{S}_t(a)=\frac{S_t(a)}{(\mathrm{mem}(a))^\delta}
+\end{equation}
+归一化使系统偏向“单位显存收益更高”的适配器。
 
-\verbbox{中文摘要}，\verbbox{英文摘要}。
+\subsection{动态适配器选择策略}
+\begin{equation}
+\mathcal{H}_t^*=\underset{\mathcal{H}\subseteq\mathcal{A}}{\operatorname{argmax}}\sum_{a\in\mathcal{H}}\tilde{S}_t(a),\quad \text{s.t.}\sum_{a\in\mathcal{H}}\mathrm{mem}(a)\le M
+\end{equation}
+该问题类似 0-1 背包，在线场景下采用基于效用排序的贪心近似求解。
+
+\subsection{在线决策过程}
+\textbf{Algorithm 1:} 基于预测的适配器调度算法。
+\begin{enumerate}
+  \item 更新请求对应适配器的 EMA 及统计信息；
+  \item 计算所有适配器效用评分 $\tilde{S}_t(a)$；
+  \item 若请求适配器已驻留，则直接执行；
+  \item 否则在必要时按低效用优先淘汰，直至满足显存约束后加载目标适配器；
+  \item 更新驻留集合并进入下一步请求。
+\end{enumerate}
