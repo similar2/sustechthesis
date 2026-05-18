@@ -1,0 +1,18 @@
+% !Mode:: "TeX:UTF-8"
+% !TEX program  = xelatex
+\section{相关研究}
+\subsection{参数高效微调（PEFT）}
+随着大语言模型规模增长，PEFT 成为关键方向。相关方法包括 Adapter、Prefix-Tuning、LoRA、AdaLoRA 与 QLoRA 等，目标是降低微调训练和部署成本。
+
+\subsection{多 LoRA 推理系统}
+PetS、Punica、S-LoRA、dLoRA、Toppings 等工作从系统层面对多 LoRA 服务进行优化，重点包括多租户并行、分页管理、异构批处理与 CPU/GPU 协同。
+
+\subsection{大语言模型推理与缓存管理}
+vLLM、Orca、Sarathi-Serve、Splitwise 等研究从推理调度和内存管理角度提升性能；ARC、TinyLFU、LeCaR、LRB 及 Learned Prefix Caching 等方法展示了预测驱动缓存策略在复杂负载中的潜力。
+
+\section{结论与展望}
+本文围绕多 LoRA 适配器推理中的显存受限与频繁切换问题，提出了基于预测模型的适配器调度方法。该方法使用 EMA 建模访问趋势，并结合队列压力、活跃状态与显存感知归一化构建统一效用函数，在在线约束下实现低开销近似优化。
+
+实验结果表明，相比 FIFO、LRU 与 LFU 等被动策略，本文方法在命中率、延迟与淘汰次数等关键指标上具有一致优势，尤其在显存预算紧张和热点动态迁移场景中表现更优。
+
+未来工作可进一步引入学习式预测器，提高突发负载下预测精度；将调度目标与端到端服务质量（如 tail latency SLO）联合建模；并扩展至多 GPU 与分布式部署环境，研究跨设备适配器协同驻留与迁移机制。
